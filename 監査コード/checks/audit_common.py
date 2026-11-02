@@ -22,9 +22,17 @@ ALLOWED_PROJECTS_FILES = {"PROJECT_LIST.md"}
 ALLOWED_PROJECT_FILES = {"INDEX.md", "chat.json"}
 # 直下に置けるのは入口とルール文書のみ。Git管理物（.git / .gitignore）は
 # バージョン管理の仕組みそのものなので例外として許可する（監査ルール13）。
-ALLOWED_AUDIT_FILES = {"audit_file_storage.py", "監査ルール.md", ".gitignore"}
-ALLOWED_AUDIT_DIRS = {"checks", ".git"}
+ALLOWED_AUDIT_FILES = {"audit_file_storage.py", "監査ルール.md", ".gitignore", ".audit-state.json", ".test-state.json"}
+ALLOWED_AUDIT_DIRS = {"checks", "tests", ".git"}
 REQUIRED_DIRS = ("files", "inputs", "hidden_files")
+# プロジェクト任意フォルダ: GitHub登録 (github/REPO.md)。無いプロジェクトは対象外 (監査ルール16)。
+GITHUB_DIR_NAME = "github"
+GITHUB_REPO_FILE = "REPO.md"
+GITHUB_VISIBILITIES = {"public", "private"}
+ALLOWED_PROJECT_DIRS = set(REQUIRED_DIRS) | {GITHUB_DIR_NAME}
+# 未配布の改良の上限 (監査ルール17)。超過したら警告する。
+RELEASE_PENDING_FILE = "リリース予定.md"  # 置き場所はプロジェクトの hidden_files/
+RELEASE_PENDING_MAX = 15
 BAD_NAME_PATTERNS = [
     re.compile(r"(?i)final"),
     re.compile(r"(?i)(^|_)new($|_)"),
@@ -51,6 +59,16 @@ class Results:
 
     def ok(self, msg: str) -> None:
         self.oks.append(msg)
+
+
+def read_text_report(res: "Results", path: Path, label: str) -> str | None:
+    """台帳ファイルを厳密に読む。読めなければ黙って読み飛ばさず、
+    エラーとして記録して None を返す (文字化けの置換で異常を飲まない)。"""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        res.error(f"[読込] {label}: ファイルが読めません: {path.name}")
+        return None
 
 
 def index_field(text: str, label: str) -> str | None:

@@ -33,7 +33,11 @@ def check_shelves(res: Results) -> None:
         catalog = HOME_DIR / name
         if not catalog.is_file():
             continue
-        text = catalog.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = catalog.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            res.error(f"[本棚] カタログが読めません: {name}")
+            continue
         m = DECL.search(text)
         if not m:
             continue

@@ -7,7 +7,8 @@
 既定は要約表示 (OKは集約、エラー・警告は全件)。--verbose で OK も全行出す。
 
 ルールの詳細は隣の 監査ルール.md を見ること。このファイルは実行の入口と
-全体の照合 (一覧・ゴール) だけを持ち、部品は checks/ に分割してある。
+全体の照合 (一覧・ゴール)、増分監査の取りまとめ (状態の読み書きと
+省略の判断) を持ち、個別の照合は checks/ の部品に分割してある。
 終了コード: 問題 (ERROR) があれば 1、なければ 0。標準ライブラリのみ。
 """
 
@@ -16,12 +17,14 @@ from __future__ import annotations
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # 部品の読み込みで __pycache__ を作らない
 sys.path.insert(0, str(Path(__file__).resolve().parent / "checks"))
 
 from audit_common import (  # noqa: E402
+    read_text_report,
     ALLOWED_AUDIT_DIRS,
     AGENTS_CHAR_LIMIT,
     AGENTS_FILE,
@@ -39,17 +42,26 @@ from audit_common import (  # noqa: E402
     validate_root,
 )
 from audit_check_project import check_project  # noqa: E402
-from audit_cross import collect_project_info, parse_project_list  # noqa: E402
+from audit_state import (  # noqa: E402
+    audit_code_fingerprint,
+    full_audit_reason,
+    load_state,
+    project_fingerprint,
+    save_state,
+)
+from audit_cross import collect_project_info, parse_project_list, project_list_problems  # noqa: E402
 from audit_shelf import check_shelves  # noqa: E402
 
 
 def check_audit_dir(res: Results) -> None:
-    """監査コードフォルダ自身の構成 (直下は入口と AGENTS.md のみ)。"""
+    """監査コードフォルダ自身の構成 (直下は入口・ルール文書・例外のみ)。"""
     if not AUDIT_DIR.is_dir():
         res.error("[監査構造] 監査コード/ フォルダがありません")
         return
     bad = []
     for entry in sorted(AUDIT_DIR.iterdir()):
+        if entry.name.startswith((".audit-state.json.", ".test-state.json.")) and entry.name.endswith(".tmp"):
+            continue  # 状態保存の一時ファイル (残っていても想定内)
         if entry.is_file() and entry.name not in ALLOWED_AUDIT_FILES:
             bad.append(entry.name)
         if entry.is_dir() and entry.name not in ALLOWED_AUDIT_DIRS:
@@ -57,23 +69,24 @@ def check_audit_dir(res: Results) -> None:
     for name in bad:
         res.error(f"[監査構造] 監査コード直下に想定外のものがあります: {name}")
     if not bad:
-        res.ok("[監査構造] 監査コード直下は入口と監査ルール.md のみ")
-    # checks/ の中身 (Python部品のみ。__pycache__ は生成物なので対象外)
-    checks_dir = AUDIT_DIR / "checks"
-    if not checks_dir.is_dir():
-        res.error("[監査構造] checks/ フォルダがありません")
-        return
-    bad_checks = []
-    for entry in sorted(checks_dir.iterdir()):
-        if entry.name == "__pycache__":
+        res.ok("[監査構造] 監査コード直下の構成が正しい")
+    # 部品フォルダ (checks/ と tests/) の中身 (Python部品のみ。__pycache__ は生成物なので対象外)
+    for dirname in ("checks", "tests"):
+        parts_dir = AUDIT_DIR / dirname
+        if not parts_dir.is_dir():
+            res.error(f"[監査構造] {dirname}/ フォルダがありません")
             continue
-        if entry.is_file() and entry.suffix == ".py":
-            continue
-        bad_checks.append(entry.name + ("/" if entry.is_dir() else ""))
-    for name in bad_checks:
-        res.error(f"[監査構造] checks/ に想定外のものがあります: {name}")
-    if not bad_checks:
-        res.ok("[監査構造] checks/ の中身はPython部品のみ")
+        bad_parts = []
+        for entry in sorted(parts_dir.iterdir()):
+            if entry.name == "__pycache__":
+                continue
+            if entry.is_file() and entry.suffix == ".py":
+                continue
+            bad_parts.append(entry.name + ("/" if entry.is_dir() else ""))
+        for name in bad_parts:
+            res.error(f"[監査構造] {dirname}/ に想定外のものがあります: {name}")
+        if not bad_parts:
+            res.ok(f"[監査構造] {dirname}/ の中身はPython部品のみ")
 
 
 def check_agents_size(res: Results) -> None:
@@ -94,7 +107,19 @@ def check_list_cross(res: Results, disk: dict[str, Path]) -> None:
     if not LIST_FILE.is_file():
         res.error("[一覧] projects/PROJECT_LIST.md がありません")
         return
-    entries = parse_project_list(LIST_FILE.read_text(encoding="utf-8", errors="replace"))
+    list_text = read_text_report(res, LIST_FILE, "PROJECT_LIST")
+    if list_text is None:
+        return
+    for problem in project_list_problems(list_text):
+        res.error(f"[一覧] PROJECT_LIST.md の行形式が想定と違います ({problem})")
+    entries = parse_project_list(list_text)
+    info_cache: dict[str, dict] = {}
+
+    def info_of(project: Path) -> dict:
+        key = str(project)
+        if key not in info_cache:
+            info_cache[key] = collect_project_info(project)
+        return info_cache[key]
     if not entries:
         res.error("[一覧] PROJECT_LIST.md にプロジェクト行がありません")
     seen_chat_ids: set[str] = set()
@@ -109,7 +134,7 @@ def check_list_cross(res: Results, disk: dict[str, Path]) -> None:
             res.error(f"[一覧] 一覧に書かれていないプロジェクトがあります: {rel}")
             continue
         row = entries[rel]
-        info = collect_project_info(project)
+        info = info_of(project)
         if info.get("project") and row["project"] != info["project"]:
             res.error(
                 f"[一覧] {rel}: 一覧のプロジェクト名「{row['project']}」が INDEX と一致しません")
@@ -150,7 +175,7 @@ def check_list_cross(res: Results, disk: dict[str, Path]) -> None:
     # ゴール側の「担当プロジェクト：{…}」と割り当て実態の照合
     goal_projects: dict[str, set[str]] = {}
     for project in disk.values():
-        pinfo = collect_project_info(project)
+        pinfo = info_of(project)
         pname = pinfo.get("project")
         if pname and "goal_raw" in pinfo:
             for gid in parse_goal_entries(pinfo["goal_raw"]):
@@ -158,9 +183,12 @@ def check_list_cross(res: Results, disk: dict[str, Path]) -> None:
     goal_notes: dict[str, set[str] | None] = {}
     if GOALS_DIR.is_dir():
         for goal_md in sorted(GOALS_DIR.glob("*/GOAL.md")):
-            gtext = goal_md.read_text(encoding="utf-8", errors="replace")
+            gtext = read_text_report(res, goal_md, "GOAL.md")
+            if gtext is None:
+                continue
             mid = re.search(r"^Goal ID:\s*(goal_\S+)", gtext, flags=re.MULTILINE)
             if not mid:
+                res.warn(f"[ゴール表記] {goal_md.parent.name}: GOAL.md に Goal ID の記載がありません")
                 continue
             mnote = re.search(r"担当プロジェクト：\{([^}]*)\}", gtext)
             if mnote is None:
@@ -186,8 +214,13 @@ def check_goal_structure(res: Results) -> None:
     """ゴール名フォルダと GOAL.md リンクの確認。"""
     if not GOALS_DIR.is_dir():
         return
+    for goal_dir in sorted(GOALS_DIR.iterdir()):
+        if goal_dir.is_dir() and not (goal_dir / "GOAL.md").is_file():
+            res.error(f"[ゴール構造] {goal_dir.name}: GOAL.md がありません")
     for goal_md in sorted(GOALS_DIR.glob("*/GOAL.md")):
-        gtext = goal_md.read_text(encoding="utf-8", errors="replace")
+        gtext = read_text_report(res, goal_md, "GOAL.md")
+        if gtext is None:
+            continue
         mtitle = re.search(r"^#\s*(.+)$", gtext, flags=re.MULTILINE)
         if not mtitle:
             continue
@@ -239,18 +272,63 @@ def main() -> int:
     if not loose:
         res.ok("[直置き] projects直下のファイルは一覧のみ")
 
+    # 増分監査: 変化のないプロジェクトは個別チェックを省略し、
+    # 前回の問題は引き継いで表示する。判断はコード自身が行う。
+    now = datetime.now().astimezone()
+    code_fp = audit_code_fingerprint()
+    state = load_state()
+    reason = full_audit_reason(state, code_fp, now)
+    full = reason is not None
+    if full:
+        res.ok(f"[全件] 全件監査を実施しました ({reason})")
+    prev_projects: dict = state["projects"] if state else {}
+    new_projects: dict[str, dict] = {}
+
+    def process(project: Path, rel: str) -> None:
+        fp = project_fingerprint(project)
+        prev = prev_projects.get(rel)
+        if not full and prev and prev.get("fingerprint") == fp:
+            res.ok(f"[省略] {project.name}: 変化なしのため個別チェックを省略"
+                   f" (前回確認 {prev.get('checked_at', '日時不明')})")
+            for prob in prev.get("problems", []):
+                text = prob["text"] + " (前回検出・変化なしのため再検査を省略)"
+                if prob["level"] == "error":
+                    res.error(text)
+                else:
+                    res.warn(text)
+            new_projects[rel] = prev
+            return
+        w0, e0 = len(res.warnings), len(res.errors)
+        check_project(res, project)
+        problems = ([{"level": "warn", "text": m} for m in res.warnings[w0:]]
+                    + [{"level": "error", "text": m} for m in res.errors[e0:]])
+        new_projects[rel] = {"fingerprint": fp,
+                             "checked_at": now.strftime("%Y-%m-%d %H:%M"),
+                             "problems": problems}
+
     # 実在プロジェクト (相対パス -> フォルダ)。アーカイブは _archive/<名前>
     disk: dict[str, Path] = {}
     projects = [p for p in sorted(PROJECTS.iterdir()) if p.is_dir() and p.name != "_archive"]
     for project in projects:
         disk[project.name] = project
-        check_project(res, project)
+        process(project, project.name)
     archived = []
     if ARCHIVE.is_dir():
         archived = [p for p in sorted(ARCHIVE.iterdir()) if p.is_dir()]
         for project in archived:
             disk[f"_archive/{project.name}"] = project
-            check_project(res, project)
+            process(project, f"_archive/{project.name}")
+
+    new_state = {
+        "version": 1,
+        "last_full_audit_at": (now.isoformat(timespec="seconds") if full
+                               else state["last_full_audit_at"]),
+        "runs_since_full": (0 if full else int(state.get("runs_since_full", 0)) + 1),
+        "audit_code_fingerprint": code_fp,
+        "projects": new_projects,
+    }
+    if not save_state(new_state):
+        res.warn("[状態] 監査の状態を保存できませんでした (次回は全件監査になります)")
 
     check_shelves(res)
     check_list_cross(res, disk)
@@ -275,7 +353,9 @@ def report(res: Results, project_count: int | None = None,
             print(f"OK    {line}")
     else:
         # プロジェクト個別のOKは集約し、それ以外はそのまま出す
-        per_project: dict[str, set[str]] = {"命名": set(), "チャット名": set(), "ゴール": set()}
+        categories = [("命名", "命名"), ("チャット名", "チャット名"), ("ゴール", "担当ゴール"),
+                      ("GitHub", "GitHub登録"), ("リリース", "リリース"), ("配布", "配布"), ("省略", "省略")]
+        per_project: dict[str, set[str]] = {c: set() for c, _ in categories}
         others: list[str] = []
         for line in res.oks:
             grouped = False
@@ -291,10 +371,11 @@ def report(res: Results, project_count: int | None = None,
         for line in others:
             print(f"OK    {line}")
         if total:
-            parts = [f"命名 {len(per_project['命名'])}/{total}件",
-                     f"チャット名 {len(per_project['チャット名'])}/{total}件",
-                     f"担当ゴール {len(per_project['ゴール'])}/{total}件"]
-            print("OK    [要約] プロジェクト個別チェック: " + "、".join(parts) + " が一致")
+            parts = [f"{label} {len(per_project[c])}/{total}件" for c, label in categories[:3]]
+            for category, label in categories[3:]:
+                if per_project[category]:
+                    parts.append(f"{label} {len(per_project[category])}/{total}件")
+            print("OK    [要約] プロジェクト個別チェック: " + "、".join(parts))
     for line in res.warnings:
         print(f"WARN  {line}")
     for line in res.errors:

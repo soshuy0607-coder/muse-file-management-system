@@ -15,15 +15,17 @@ def parse_project_list(text: str) -> dict[str, dict[str, str]]:
         if not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 5 or cells[0] in ("フォルダ", "") or set(cells[0]) <= {"-", " "}:
+        if cells[0] in ("フォルダ", "") or set(cells[0]) <= {"-", " "}:
             continue
+        if len(cells) != 6:
+            continue  # 形式の崩れた行は読み込まない (検出は project_list_problems の役目)
         folder = cells[0].strip("`").rstrip("/")
         entries[folder] = {
             "project": cells[1],
             "chat": cells[2],
             "chat_id": cells[3],
-            "goal": cells[4] if len(cells) >= 6 else "",
-            "status": cells[5] if len(cells) >= 6 else cells[4],
+            "goal": cells[4],
+            "status": cells[5],
         }
     return entries
 
@@ -33,7 +35,10 @@ def collect_project_info(project: Path) -> dict[str, str]:
     info: dict[str, str] = {}
     index = project / "INDEX.md"
     if index.is_file():
-        text = index.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = index.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""  # 読めない台帳は情報なしとして扱う (検出は個別チェックの役目)
         for key, label in (("project", "プロジェクト名"), ("chat", "サイドチャット名"),
                            ("chat_id", "チャットID")):
             value = index_field(text, label)
@@ -52,6 +57,25 @@ def collect_project_info(project: Path) -> dict[str, str]:
                     info["actual_chat"] = str(data["chat_name"])
                 if data.get("chat_id"):
                     info["actual_chat_id"] = str(data["chat_id"])
-        except json.JSONDecodeError:
-            pass
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            pass  # 読めない場合は情報なしとして扱う (検出は個別チェックの役目)
     return info
+
+
+def project_list_problems(text: str) -> list[str]:
+    """PROJECT_LIST.md の表の行形式の問題を返す。
+
+    データ行は6列 (フォルダ/プロジェクト名/チャット名/チャットID/担当ゴール/状態)
+    でなければならない。列数が違う行は、黙って誤読せずここで拾う。
+    """
+    problems: list[str] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if cells[0] in ("フォルダ", "") or set(cells[0]) <= {"-", " "}:
+            continue  # ヘッダー行と区切り行
+        if len(cells) != 6:
+            problems.append(f"{lineno}行目: 列が {len(cells)} 個あります (6列のはずです)")
+    return problems
