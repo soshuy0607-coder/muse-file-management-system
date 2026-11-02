@@ -26,6 +26,23 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def fresh_base(project: Path) -> dict:
+    """鮮度チェック (ルール21) の比較材料。
+
+    プロジェクト直下の顔ぶれ (第1階層の名前の集合) と INDEX.md の
+    内容ハッシュ。状態ファイルに一緒に保存し、次回と比較する。
+    """
+    top = set()
+    for dirpath, dirnames, filenames in os.walk(project):
+        base = Path(dirpath)
+        for name in list(dirnames) + list(filenames):
+            rel = (base / name).relative_to(project).as_posix()
+            top.add(rel.split("/")[0])
+    index = project / "INDEX.md"
+    index_hash = _sha256(index.read_bytes()) if index.is_file() else None
+    return {"top": sorted(top), "index": index_hash}
+
+
 def project_fingerprint(project: Path) -> str:
     """プロジェクトの指紋 (全ファイルのパス・サイズ・更新時刻＋台帳は内容)。
 

@@ -45,6 +45,8 @@ PART_FILES = {
     "cross": CODE_ROOT / "checks" / "audit_cross.py",
     "shelf": CODE_ROOT / "checks" / "audit_shelf.py",
     "state": CODE_ROOT / "checks" / "audit_state.py",
+    "refs": CODE_ROOT / "checks" / "audit_refs.py",
+    "fresh": CODE_ROOT / "checks" / "audit_fresh.py",
     "entry": CODE_ROOT / "audit_file_storage.py",
 }
 

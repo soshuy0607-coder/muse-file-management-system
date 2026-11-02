@@ -75,6 +75,8 @@ class Ctx:
         (audit_dir / "checks").mkdir(parents=True)
         (audit_dir / "audit_file_storage.py").write_bytes(
             (CODE_ROOT / "audit_file_storage.py").read_bytes())
+        (audit_dir / "監査ルール.md").write_bytes(
+            (CODE_ROOT / "監査ルール.md").read_bytes())
         for part in (CODE_ROOT / "checks").glob("*.py"):
             (audit_dir / "checks" / part.name).write_bytes(part.read_bytes())
         (audit_dir / ".git").mkdir()  # 履歴の照合先 (中身は空でよい)
@@ -86,6 +88,7 @@ class Ctx:
         shelf.mkdir(parents=True)
         (shelf / "テスト本.md").write_text("# テスト本\n", encoding="utf-8")
         (ws / "projects").mkdir()
+        (ws / "projects" / "_archive").mkdir()
         (ws / "projects" / "PROJECT_LIST.md").write_text(LIST_TEXT, encoding="utf-8")
         for d in ("files", "inputs", "hidden_files"):
             (self.project / d).mkdir(parents=True)
@@ -399,6 +402,114 @@ def case_release_pending_broken_encoding(ctx: Ctx) -> list[str]:
     return problems
 
 
+def _add_declared_doc(ctx: Ctx, body: str) -> None:
+    (ctx.project / "hidden_files" / "メモ.md").write_text(body, encoding="utf-8")
+
+
+def case_refs_missing_path(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    _add_declared_doc(ctx, "# メモ\n\n参照チェック：対象\n\n参照は `存在しない場所/資料.md` です。\n")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "参照先が見つかりません")
+    return problems
+
+
+def case_refs_missing_name(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    _add_declared_doc(ctx, "# メモ\n\n参照チェック：対象\n\n設定は MISSING_REFERENCE_TOKEN で決まります。\n")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "他に現れない名前です")
+    return problems
+
+
+def case_refs_exempt(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    _add_declared_doc(ctx, "# メモ\n\n参照チェック：対象\n参照チェック対象外：存在しない場所/資料.md、MISSING_REFERENCE_TOKEN\n\n参照は `存在しない場所/資料.md` と MISSING_REFERENCE_TOKEN です。\n")
+    code, out = ctx.run()
+    if "参照先が見つかりません" in out or "他に現れない名前です" in out:
+        problems.append("対象外に宣言した参照が警告されました")
+    return problems
+
+
+def case_refs_ok(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    _add_declared_doc(ctx, "# メモ\n\n参照チェック：対象\n\n参照は `監査コード/checks/audit_common.py` と MUSE_AUDIT_ROOT です。\n")
+    code, out = ctx.run()
+    if "参照先が見つかりません" in out or "他に現れない名前です" in out:
+        problems.append("実在する参照が警告されました")
+    return problems
+
+
+def case_refs_mention_not_declared(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    (ctx.project / "hidden_files" / "メモ.md").write_text(
+        "# メモ\n\n「参照チェック：対象」と宣言した文書だけが照合されます。\n\n- `存在しない.md` への参照\n", encoding="utf-8")
+    code, out = ctx.run()
+    if code != 0:
+        problems.append(f"終了コードが {code} (期待: 0)")
+    if "参照先が見つかりません" in out or "他に現れない名前です" in out:
+        problems.append("宣言していない文書が参照チェックされました")
+    return problems
+
+
+def case_fresh_index_listing_missing(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    index = ctx.project / "INDEX.md"
+    index.write_text(index.read_text(encoding="utf-8") + "\n## フォルダ構成\n\n- `files/` — 成果物\n- `存在しない/` — 説明\n", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "フォルダ構成に載っている")
+    return problems
+
+
+def case_fresh_self_count_mismatch(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    (ctx.project / "hidden_files" / "メモ.md").write_text(
+        "# メモ\n\n参照チェック：対象\n\n全3項目あります。\n\n1. ひとつ\n2. ふたつ\n", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "主張と")
+    return problems
+
+
+def case_fresh_pointer_stale(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    gh = ctx.add_github()
+    (gh / "REPO.md").write_text(REPO_TEXT.replace("- 同期元：files", "- 同期元：files/配布版_v1.0.0"), encoding="utf-8")
+    for version in ("v1.0.0", "v1.1.0"):
+        folder = ctx.project / "files" / f"配布版_{version}"
+        folder.mkdir()
+        (folder / "README.md").write_text("x", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "より新しい配布版")
+    return problems
+
+
+def case_fresh_stale_dated(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    (ctx.project / "hidden_files" / "メモ.md").write_text(
+        "# メモ\n\n現況（2020-01-01 時点）です。\n", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "2020-01-01")
+    return problems
+
+
+def case_fresh_structure_divergence(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    ctx.run()  # 基準の状態を作る
+    ctx.add_github()
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "構成が変わりましたが")
+    return problems
+
+
+def case_fresh_parts_list_mismatch(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    doc = ctx.workspace / "監査コード" / "監査ルール.md"
+    doc.write_text(doc.read_text(encoding="utf-8").replace("`audit_shelf.py`", "`audit_shelf_OLD.py`", 1), encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "部品一覧")
+    return problems
+
+
 def case_distribution_ok(ctx: Ctx) -> list[str]:
     problems: list[str] = []
     _add_distribution(ctx)
@@ -514,6 +625,17 @@ CASES: dict[str, tuple] = {
     "release_pending_boundary": (case_release_pending_boundary, ["check_project"]),
     "release_pending_over": (case_release_pending_over, ["check_project"]),
     "release_pending_broken_encoding": (case_release_pending_broken_encoding, ["check_project"]),
+    "refs_missing_path": (case_refs_missing_path, ["refs"]),
+    "refs_missing_name": (case_refs_missing_name, ["refs"]),
+    "refs_exempt": (case_refs_exempt, ["refs"]),
+    "refs_ok": (case_refs_ok, ["refs"]),
+    "refs_mention_not_declared": (case_refs_mention_not_declared, ["refs"]),
+    "fresh_index_listing_missing": (case_fresh_index_listing_missing, ["fresh"]),
+    "fresh_self_count_mismatch": (case_fresh_self_count_mismatch, ["fresh"]),
+    "fresh_pointer_stale": (case_fresh_pointer_stale, ["fresh"]),
+    "fresh_stale_dated": (case_fresh_stale_dated, ["fresh"]),
+    "fresh_structure_divergence": (case_fresh_structure_divergence, ["fresh", "state"]),
+    "fresh_parts_list_mismatch": (case_fresh_parts_list_mismatch, ["fresh"]),
     "distribution_ok": (case_distribution_ok, ["check_project"]),
     "distribution_version_mismatch": (case_distribution_version_mismatch, ["check_project"]),
     "distribution_zip_mismatch": (case_distribution_zip_mismatch, ["check_project"]),

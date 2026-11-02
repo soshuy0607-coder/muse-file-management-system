@@ -44,6 +44,7 @@ from audit_common import (  # noqa: E402
 from audit_check_project import check_project  # noqa: E402
 from audit_state import (  # noqa: E402
     audit_code_fingerprint,
+    fresh_base,
     full_audit_reason,
     load_state,
     project_fingerprint,
@@ -51,6 +52,8 @@ from audit_state import (  # noqa: E402
 )
 from audit_cross import collect_project_info, parse_project_list, project_list_problems  # noqa: E402
 from audit_shelf import check_shelves  # noqa: E402
+from audit_refs import check_references  # noqa: E402
+from audit_fresh import check_freshness  # noqa: E402
 
 
 def check_audit_dir(res: Results) -> None:
@@ -304,7 +307,8 @@ def main() -> int:
                     + [{"level": "error", "text": m} for m in res.errors[e0:]])
         new_projects[rel] = {"fingerprint": fp,
                              "checked_at": now.strftime("%Y-%m-%d %H:%M"),
-                             "problems": problems}
+                             "problems": problems,
+                             "fresh_base": fresh_base(project)}
 
     # 実在プロジェクト (相対パス -> フォルダ)。アーカイブは _archive/<名前>
     disk: dict[str, Path] = {}
@@ -333,6 +337,11 @@ def main() -> int:
     check_shelves(res)
     check_list_cross(res, disk)
     check_goal_structure(res)
+    check_references(res)
+    check_freshness(
+        res,
+        {rel: e.get("fresh_base") for rel, e in prev_projects.items()},
+        {rel: e.get("fresh_base") for rel, e in new_projects.items()})
 
     report(res, len(projects), [p.name for p in projects], len(archived), verbose)
     return 1 if res.errors else 0
