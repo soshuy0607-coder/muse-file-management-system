@@ -440,6 +440,16 @@ def case_refs_ok(ctx: Ctx) -> list[str]:
     return problems
 
 
+def case_distribution_readme_version_mismatch(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    _add_distribution(ctx)
+    dist = ctx.project / "files" / "配布版_v1.0.0"
+    (dist / "README.md").write_text("# ファイル管理システム 配布版 v0.9.0\n", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 1, "README の版表記")
+    return problems
+
+
 def case_refs_mention_not_declared(ctx: Ctx) -> list[str]:
     problems: list[str] = []
     (ctx.project / "hidden_files" / "メモ.md").write_text(
@@ -629,6 +639,7 @@ CASES: dict[str, tuple] = {
     "refs_missing_name": (case_refs_missing_name, ["refs"]),
     "refs_exempt": (case_refs_exempt, ["refs"]),
     "refs_ok": (case_refs_ok, ["refs"]),
+    "distribution_readme_version_mismatch": (case_distribution_readme_version_mismatch, ["project"]),
     "refs_mention_not_declared": (case_refs_mention_not_declared, ["refs"]),
     "fresh_index_listing_missing": (case_fresh_index_listing_missing, ["fresh"]),
     "fresh_self_count_mismatch": (case_fresh_self_count_mismatch, ["fresh"]),

@@ -177,11 +177,15 @@ def check_distribution(res: Results, project: Path) -> None:
     files_dir = project / "files"
     if not files_dir.is_dir():
         return
+    dists = []
     for folder in sorted(files_dir.iterdir()):
         m = re.match(r"^配布版_v(\d+(?:\.\d+)+)$", folder.name)
-        if not folder.is_dir() or not m:
-            continue
-        ver = m.group(1)
+        if folder.is_dir() and m:
+            dists.append((folder, m.group(1)))
+    newest = None
+    if dists:
+        newest = max(dists, key=lambda d: tuple(int(x) for x in d[1].split(".")))[1]
+    for folder, ver in dists:
         version_file = folder / "VERSION"
         changelog = folder / "CHANGELOG.md"
         if version_file.is_file() or changelog.is_file():
@@ -189,6 +193,13 @@ def check_distribution(res: Results, project: Path) -> None:
                 res.error(f"[配布] {name}: {folder.name} に VERSION がありません")
             elif version_file.read_text(encoding="utf-8", errors="replace").strip() != ver:
                 res.error(f"[配布] {name}: {folder.name} の VERSION の中身がフォルダ名の版と一致しません")
+            readme = folder / "README.md"
+            if ver == newest and readme.is_file():
+                rm = re.search(r"配布版\s*v(\d+(?:\.\d+)+)",
+                               readme.read_text(encoding="utf-8", errors="replace"))
+                if rm and rm.group(1) != ver:
+                    res.error(f"[配布] {name}: {folder.name} の README の版表記"
+                              f" (v{rm.group(1)}) がフォルダ名の版と一致しません")
             if not changelog.is_file():
                 res.error(f"[配布] {name}: {folder.name} に CHANGELOG.md がありません")
             else:
