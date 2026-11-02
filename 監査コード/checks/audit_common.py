@@ -20,8 +20,10 @@ AGENTS_CHAR_LIMIT = 3000  # これを超えたら警告 (詳細は監査ルー�
 ALLOWED_ROOT_FILES: set[str] = set()  # workspace直下にファイルは置かない
 ALLOWED_PROJECTS_FILES = {"PROJECT_LIST.md"}
 ALLOWED_PROJECT_FILES = {"INDEX.md", "chat.json"}
-ALLOWED_AUDIT_FILES = {"audit_file_storage.py", "監査ルール.md"}
-ALLOWED_AUDIT_DIRS = {"checks"}
+# 直下に置けるのは入口とルール文書のみ。Git管理物（.git / .gitignore）は
+# バージョン管理の仕組みそのものなので例外として許可する（監査ルール13）。
+ALLOWED_AUDIT_FILES = {"audit_file_storage.py", "監査ルール.md", ".gitignore"}
+ALLOWED_AUDIT_DIRS = {"checks", ".git"}
 REQUIRED_DIRS = ("files", "inputs", "hidden_files")
 BAD_NAME_PATTERNS = [
     re.compile(r"(?i)final"),
