@@ -10,7 +10,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from audit_common import HOME_DIR, Results
+from audit_common import (HOME_DIR, MEMORY_CHAR_LIMIT,
+                        MEMORY_ENTRY_CHAR_LIMIT, Results)
 
 # 本棚を持ち得るカタログ (ホーム直下)。宣言があるものだけ照合する
 CATALOG_FILES = ("AGENTS.md", "USER.md", "MEMORY.md", "SOUL.md", "IDENTITY.md", "TOOLS.md",
@@ -25,6 +26,30 @@ def _headings(path: Path) -> set[str]:
     except OSError:
         return set()
     return {line.lstrip("# ").strip() for line in text.splitlines() if line.startswith("#")}
+
+
+def check_sizes(res: Results) -> None:
+    """22. 常時読込ファイルのサイズ (MEMORY.md の総量と項目長)。
+
+    毎回読み込まれる MEMORY.md は、大きくなると全ターンの
+    トークンを消費する。総量の上限と、1項目の長さの目安を
+    超えたら警告する (詳細は本やプロジェクトファイルへ
+    逃がす候補)。AGENTS.md の上限はルール14が別に担う。
+    """
+    path = HOME_DIR / "MEMORY.md"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if len(text) > MEMORY_CHAR_LIMIT:
+        res.warn(f"[サイズ] MEMORY.md: 総量が目安 ({MEMORY_CHAR_LIMIT:,}字) を"
+                 f"超えています (現在 {len(text):,}字)")
+    for entry in text.split("\n- "):
+        entry = entry.strip()
+        if len(entry) > MEMORY_ENTRY_CHAR_LIMIT:
+            label = entry.splitlines()[0][:36] if entry else ""
+            res.warn(f"[サイズ] MEMORY.md: 長すぎる項目があります"
+                     f" ({len(entry):,}字): {label}…")
 
 
 def check_shelves(res: Results) -> None:

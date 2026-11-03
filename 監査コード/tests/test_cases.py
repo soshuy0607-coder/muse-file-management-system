@@ -440,6 +440,23 @@ def case_refs_ok(ctx: Ctx) -> list[str]:
     return problems
 
 
+def case_size_total_over(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    body = "# MEMORY\n\n" + "".join("- これは短い項目です。要点だけを書きます。\n" for _ in range(700))
+    (ctx.home / "MEMORY.md").write_text(body, encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "総量が目安")
+    return problems
+
+
+def case_size_entry_over(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    (ctx.home / "MEMORY.md").write_text("# MEMORY\n\n- " + "あ" * 2500 + "\n", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "長すぎる項目があります")
+    return problems
+
+
 def case_distribution_readme_version_mismatch(ctx: Ctx) -> list[str]:
     problems: list[str] = []
     _add_distribution(ctx)
@@ -639,6 +656,8 @@ CASES: dict[str, tuple] = {
     "refs_missing_name": (case_refs_missing_name, ["refs"]),
     "refs_exempt": (case_refs_exempt, ["refs"]),
     "refs_ok": (case_refs_ok, ["refs"]),
+    "size_total_over": (case_size_total_over, ["shelf"]),
+    "size_entry_over": (case_size_entry_over, ["shelf"]),
     "distribution_readme_version_mismatch": (case_distribution_readme_version_mismatch, ["project"]),
     "refs_mention_not_declared": (case_refs_mention_not_declared, ["refs"]),
     "fresh_index_listing_missing": (case_fresh_index_listing_missing, ["fresh"]),
