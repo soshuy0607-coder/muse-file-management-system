@@ -51,7 +51,7 @@ from audit_state import (  # noqa: E402
     save_state,
 )
 from audit_cross import collect_project_info, parse_project_list, project_list_problems  # noqa: E402
-from audit_shelf import check_shelves, check_sizes  # noqa: E402
+from audit_shelf import check_anchors, check_shelves, check_sizes  # noqa: E402
 from audit_refs import check_references  # noqa: E402
 from audit_fresh import check_freshness  # noqa: E402
 
@@ -336,6 +336,7 @@ def main() -> int:
 
     check_shelves(res)
     check_sizes(res)
+    check_anchors(res)
     check_list_cross(res, disk)
     check_goal_structure(res)
     check_references(res)

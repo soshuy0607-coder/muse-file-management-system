@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from audit_common import (HOME_DIR, MEMORY_CHAR_LIMIT,
+from audit_common import (HOME_DIR, ROOT, MEMORY_BYTE_LIMIT,
                         MEMORY_ENTRY_CHAR_LIMIT, Results)
 
 # 本棚を持ち得るカタログ (ホーム直下)。宣言があるものだけ照合する
@@ -28,6 +28,32 @@ def _headings(path: Path) -> set[str]:
     return {line.lstrip("# ").strip() for line in text.splitlines() if line.startswith("#")}
 
 
+def _save_memory_autocopy(text: str) -> str:
+    """サイズ警告時に、その時点の MEMORY.md 全文を自動コピーする。
+
+    保存先は管理プロジェクトの hidden_files。ファイル名に
+    内容ハッシュを含め、同一内容は重複して作らない。
+    戻り値は、警告文に付す結果の一文。
+    """
+    import datetime
+    import hashlib
+
+    proj = ROOT / "projects" / "ファイル管理システム_監査システム管理"
+    if not proj.is_dir():
+        return "自動コピーの保存先（管理プロジェクト）が無いため未保存"
+    dest_dir = proj / "hidden_files"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+    if list(dest_dir.glob(f"自動コピー_MEMORY_*_{digest}.md")):
+        return "自動コピーは保存済み（同一内容）"
+    name = f"自動コピー_MEMORY_{datetime.date.today():%Y-%m-%d}_{digest}.md"
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        (dest_dir / name).write_text(text, encoding="utf-8")
+    except OSError:
+        return "自動コピーの保存に失敗しました"
+    return f"自動コピーを保存しました: {name}"
+
+
 def check_sizes(res: Results) -> None:
     """22. 常時読込ファイルのサイズ (MEMORY.md の総量と項目長)。
 
@@ -35,21 +61,151 @@ def check_sizes(res: Results) -> None:
     トークンを消費する。総量の上限と、1項目の長さの目安を
     超えたら警告する (詳細は本やプロジェクトファイルへ
     逃がす候補)。AGENTS.md の上限はルール14が別に担う。
+    警告を発した時点で、その時点の全文を自動コピーする
+    (圧縮時の内容確認の土台。詳細は監査ルール.md 第4節)。
     """
     path = HOME_DIR / "MEMORY.md"
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return
-    if len(text) > MEMORY_CHAR_LIMIT:
-        res.warn(f"[サイズ] MEMORY.md: 総量が目安 ({MEMORY_CHAR_LIMIT:,}字) を"
-                 f"超えています (現在 {len(text):,}字)")
+    messages: list[str] = []
+    nbytes = len(text.encode("utf-8"))
+    if nbytes > MEMORY_BYTE_LIMIT:
+        messages.append(f"[サイズ] MEMORY.md: 総量が目安 ({MEMORY_BYTE_LIMIT:,}バイト) を"
+                        f"超えています (現在 {nbytes:,}バイト)")
     for entry in text.split("\n- "):
         entry = entry.strip()
         if len(entry) > MEMORY_ENTRY_CHAR_LIMIT:
             label = entry.splitlines()[0][:36] if entry else ""
-            res.warn(f"[サイズ] MEMORY.md: 長すぎる項目があります"
-                     f" ({len(entry):,}字): {label}…")
+            messages.append(f"[サイズ] MEMORY.md: 長すぎる項目があります"
+                            f" ({len(entry):,}字): {label}…")
+    if messages:
+        note = _save_memory_autocopy(text)
+        for msg in messages:
+            res.warn(f"{msg}（{note}）")
+
+
+_MGMT_HIDDEN = ("projects", "ファイル管理システム_監査システム管理", "hidden_files")
+
+_ANCHOR_PATTERNS = (
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",  # UUID
+    r"goal_[0-9a-f]{8,}",  # ゴールID
+    r"(?<![A-Za-z0-9])D\d{1,3}(?!\d)",  # 決定番号 (D123 など)
+    r"『[^』]{2,}』",  # 作品名・固有名詞
+    r"(?<![\w])[\w\-./]+\.md",  # ファイル名・パス (日本語に接着したものは拾わない)
+    r"\d{1,3},\d{3}",  # 桁区切りの数値
+    r"v\d+\.\d+(?:\.\d+)?",  # 版番号
+    r"\d+(?:\.\d+)?(?:項目|倍|秒|マス|%)",  # 特徴的な数値
+)
+
+
+def _extract_anchors(text: str) -> set[str]:
+    anchors: set[str] = set()
+    for pattern in _ANCHOR_PATTERNS:
+        for hit in re.findall(pattern, text):
+            hit = hit.strip()
+            if len(hit) >= 2:
+                anchors.add(hit)
+    return anchors
+
+
+def _is_snapshot_name(name: str) -> bool:
+    return name.startswith("自動コピー_MEMORY_") or name.endswith("_MEMORY圧縮前_全文.md")
+
+
+def _latest_snapshot() -> Path | None:
+    folder = ROOT.joinpath(*_MGMT_HIDDEN)
+    if not folder.is_dir():
+        return None
+    cands = [p for p in folder.iterdir() if p.is_file() and _is_snapshot_name(p.name)]
+    if not cands:
+        return None
+
+    def key(p: Path) -> tuple[str, float]:
+        m = re.search(r"\d{4}-\d{2}-\d{2}", p.name)
+        return (m.group(0) if m else "", p.stat().st_mtime)
+
+    return max(cands, key=key)
+
+
+def _discarded_anchors() -> set[str]:
+    path = ROOT.joinpath(*_MGMT_HIDDEN) / "メモリ破棄台帳.md"
+    out: set[str] = set()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        line = line.strip()
+        if line.startswith("- "):
+            token = re.split(r"[：:｜|（]", line[2:].strip(), maxsplit=1)[0].strip()
+            if token:
+                out.add(token)
+    return out
+
+
+def _corpus_texts() -> list[str]:
+    texts: list[str] = []
+    bases = [ROOT, HOME_DIR / "memory", HOME_DIR / "本棚"]
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for p in base.rglob("*"):
+            if p.suffix not in (".md", ".txt", ".json", ".py"):
+                continue
+            if ".git" in p.parts or _is_snapshot_name(p.name) or p.name == "メモリ破棄台帳.md":
+                continue
+            if base == ROOT and p.parts[len(base.parts)] == "監査コード":
+                continue  # 監査コード自身は正の置き場ではない
+            try:
+                texts.append(p.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                pass
+    for p in HOME_DIR.glob("*.md"):
+        try:
+            texts.append(p.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            pass
+    return texts
+
+
+def check_anchors(res: Results) -> None:
+    """23. 圧縮時の内容確認 (スナップショットからの痕跡の生存)。
+
+    最新のスナップショットにあって現行 MEMORY.md から消えた
+    痕跡 (ID・決定番号・数値など) が、正の置き場 (ワークスペース・
+    memory・本棚の文書) にも見つからなければ警告する。
+    破棄台帳に登録された痕跡は照合から外す。スナップショットが
+    無ければ照合しない。詳細は監査ルール.md 第4節。
+    """
+    snap = _latest_snapshot()
+    if snap is None:
+        return
+    try:
+        base_text = snap.read_text(encoding="utf-8", errors="replace")
+        current = (HOME_DIR / "MEMORY.md").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    discarded = _discarded_anchors()
+    candidates = sorted(
+        a for a in _extract_anchors(base_text)
+        if a not in current and a not in discarded)
+    if not candidates:
+        res.ok(f"[痕跡] MEMORY.md: スナップショット ({snap.name}) からの痕跡は"
+               "すべて現行メモリか破棄台帳で確認できました")
+        return
+    corpus = _corpus_texts()
+    missing = [a for a in candidates if not any(a in t for t in corpus)]
+    if missing:
+        shown = ", ".join(missing[:15])
+        more = f" ほか{len(missing) - 15}件" if len(missing) > 15 else ""
+        res.warn(f"[痕跡] MEMORY.md: スナップショット ({snap.name}) から消えた痕跡が、"
+                 f"現行メモリにも正の置き場にも見つかりません: {shown}{more}"
+                 f" (全{len(missing)}件)")
+    else:
+        res.ok(f"[痕跡] MEMORY.md: スナップショット ({snap.name}) からの痕跡は"
+               "すべて正の置き場で確認できました")
 
 
 def check_shelves(res: Results) -> None:

@@ -451,9 +451,92 @@ def case_size_total_over(ctx: Ctx) -> list[str]:
 
 def case_size_entry_over(ctx: Ctx) -> list[str]:
     problems: list[str] = []
-    (ctx.home / "MEMORY.md").write_text("# MEMORY\n\n- " + "あ" * 2500 + "\n", encoding="utf-8")
+    (ctx.home / "MEMORY.md").write_text("# MEMORY\n\n- " + "あ" * 3500 + "\n", encoding="utf-8")
     code, out = ctx.run()
     ctx.expect(problems, code, out, 0, "長すぎる項目があります")
+    return problems
+
+
+MGMT_INDEX_TEXT = """# ファイル管理システム_監査システム管理
+
+- プロジェクト名：ファイル管理システム
+- サイドチャット名：ファイル管理システム_監査システム管理
+- チャットID：chat-id-0002
+- 担当ゴール：なし
+"""
+
+
+def case_size_autocopy(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    proj = ctx.workspace / "projects" / "ファイル管理システム_監査システム管理"
+    for d in ("files", "inputs", "hidden_files"):
+        (proj / d).mkdir(parents=True)
+    (proj / "INDEX.md").write_text(MGMT_INDEX_TEXT, encoding="utf-8")
+    (proj / "chat.json").write_text(
+        json.dumps({"chat_name": "ファイル管理システム_監査システム管理",
+                    "chat_id": "chat-id-0002"}), encoding="utf-8")
+    list_path = ctx.workspace / "projects" / "PROJECT_LIST.md"
+    list_path.write_text(
+        LIST_TEXT + "| `ファイル管理システム_監査システム管理` | ファイル管理システム | ファイル管理システム_監査システム管理 | chat-id-0002 | なし | 進行中 |\n",
+        encoding="utf-8")
+    body = "# MEMORY\n\n" + "".join("- これは短い項目です。要点だけを書きます。\n" for _ in range(700))
+    (ctx.home / "MEMORY.md").write_text(body, encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "総量が目安", "自動コピーを保存しました")
+    copies = list((proj / "hidden_files").glob("自動コピー_MEMORY_*.md"))
+    if len(copies) != 1:
+        problems.append(f"自動コピーが1件ではありません ({len(copies)}件)")
+    elif copies[0].read_text(encoding="utf-8") != body:
+        problems.append("自動コピーの内容が MEMORY.md と一致しません")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "自動コピーは保存済み（同一内容）")
+    copies = list((proj / "hidden_files").glob("自動コピー_MEMORY_*.md"))
+    if len(copies) != 1:
+        problems.append(f"同一内容のコピーが重複しました ({len(copies)}件)")
+    return problems
+
+
+def _add_mgmt_project(ctx: Ctx) -> Path:
+    proj = ctx.workspace / "projects" / "ファイル管理システム_監査システム管理"
+    for d in ("files", "inputs", "hidden_files"):
+        (proj / d).mkdir(parents=True, exist_ok=True)
+    (proj / "INDEX.md").write_text(MGMT_INDEX_TEXT, encoding="utf-8")
+    (proj / "chat.json").write_text(
+        json.dumps({"chat_name": "ファイル管理システム_監査システム管理",
+                    "chat_id": "chat-id-0002"}), encoding="utf-8")
+    list_path = ctx.workspace / "projects" / "PROJECT_LIST.md"
+    if "chat-id-0002" not in list_path.read_text(encoding="utf-8"):
+        list_path.write_text(
+            LIST_TEXT + "| `ファイル管理システム_監査システム管理` | ファイル管理システム | ファイル管理システム_監査システム管理 | chat-id-0002 | なし | 進行中 |\n",
+            encoding="utf-8")
+    return proj
+
+
+def case_anchor_check(ctx: Ctx) -> list[str]:
+    problems: list[str] = []
+    proj = _add_mgmt_project(ctx)
+    hidden = proj / "hidden_files"
+    (hidden / "2026-11-06_MEMORY圧縮前_全文.md").write_text(
+        "# MEMORY\n\n- テスト項目：検証は D999 と D998 で確定し、"
+        "goal_deadbeef42 と『消えた本』を扱う。\n", encoding="utf-8")
+    (ctx.project / "hidden_files" / "保持メモ.md").write_text(
+        "確定事項：D998 はこちらに残っている。\n", encoding="utf-8")
+    (ctx.home / "MEMORY.md").write_text(
+        "# MEMORY\n\n- 現在の項目だけが残っている。\n", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "[痕跡]", "D999", "goal_deadbeef42")
+    warn_lines = [ln for ln in out.splitlines() if "[痕跡]" in ln and "WARN" in ln]
+    if any("D998" in ln for ln in warn_lines):
+        problems.append("正の置き場に残っている D998 が欠落として警告されました")
+    (hidden / "メモリ破棄台帳.md").write_text(
+        "# メモリ破棄台帳\n\n## 登録\n\n"
+        "- D999：テスト用のダミー（2026-11-06）\n"
+        "- goal_deadbeef42：テスト用のダミー（2026-11-06）\n"
+        "- 『消えた本』：テスト用のダミー（2026-11-06）\n", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "確認できました")
+    if any("[痕跡]" in ln and "WARN" in ln for ln in out.splitlines()):
+        problems.append("破棄台帳へ登録したのに痕跡の警告が残りました")
     return problems
 
 
@@ -658,6 +741,8 @@ CASES: dict[str, tuple] = {
     "refs_ok": (case_refs_ok, ["refs"]),
     "size_total_over": (case_size_total_over, ["shelf"]),
     "size_entry_over": (case_size_entry_over, ["shelf"]),
+    "size_autocopy": (case_size_autocopy, ["shelf"]),
+    "anchor_check": (case_anchor_check, ["shelf"]),
     "distribution_readme_version_mismatch": (case_distribution_readme_version_mismatch, ["project"]),
     "refs_mention_not_declared": (case_refs_mention_not_declared, ["refs"]),
     "fresh_index_listing_missing": (case_fresh_index_listing_missing, ["fresh"]),

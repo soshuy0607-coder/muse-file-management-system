@@ -16,8 +16,8 @@ AUDIT_DIR = ROOT / "監査コード"
 HOME_DIR = ROOT.parent  # ホーム (カタログと本棚の置き場所)
 AGENTS_FILE = ROOT.parent / "AGENTS.md"  # 全体用AGENTS.md (毎回読み込まれる)
 AGENTS_CHAR_LIMIT = 3000  # これを超えたら警告 (詳細は監査ルール.mdへ移す目安)
-MEMORY_CHAR_LIMIT = 15000  # MEMORY.md の総量の目安 (超えたら警告)
-MEMORY_ENTRY_CHAR_LIMIT = 2000  # MEMORY.md の1項目の長さの目安 (超えたら警告)
+MEMORY_BYTE_LIMIT = 30000  # MEMORY.md の総量の目安 (バイト数、超えたら警告)
+MEMORY_ENTRY_CHAR_LIMIT = 3000  # MEMORY.md の1項目の長さの目安 (字数、超えたら警告)
 
 ALLOWED_ROOT_FILES: set[str] = set()  # workspace直下にファイルは置かない
 ALLOWED_PROJECTS_FILES = {"PROJECT_LIST.md"}
