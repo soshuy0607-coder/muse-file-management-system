@@ -468,29 +468,19 @@ MGMT_INDEX_TEXT = """# ファイル管理システム_監査システム管理
 
 def case_size_autocopy(ctx: Ctx) -> list[str]:
     problems: list[str] = []
-    proj = ctx.workspace / "projects" / "ファイル管理システム_監査システム管理"
-    for d in ("files", "inputs", "hidden_files"):
-        (proj / d).mkdir(parents=True)
-    (proj / "INDEX.md").write_text(MGMT_INDEX_TEXT, encoding="utf-8")
-    (proj / "chat.json").write_text(
-        json.dumps({"chat_name": "ファイル管理システム_監査システム管理",
-                    "chat_id": "chat-id-0002"}), encoding="utf-8")
-    list_path = ctx.workspace / "projects" / "PROJECT_LIST.md"
-    list_path.write_text(
-        LIST_TEXT + "| `ファイル管理システム_監査システム管理` | ファイル管理システム | ファイル管理システム_監査システム管理 | chat-id-0002 | なし | 進行中 |\n",
-        encoding="utf-8")
+    snap_dir = ctx.home / "本棚" / "MEMORYスナップショット"
     body = "# MEMORY\n\n" + "".join("- これは短い項目です。要点だけを書きます。\n" for _ in range(700))
     (ctx.home / "MEMORY.md").write_text(body, encoding="utf-8")
     code, out = ctx.run()
     ctx.expect(problems, code, out, 0, "総量が目安", "自動コピーを保存しました")
-    copies = list((proj / "hidden_files").glob("自動コピー_MEMORY_*.md"))
+    copies = list(snap_dir.glob("自動コピー_MEMORY_*.md")) if snap_dir.is_dir() else []
     if len(copies) != 1:
         problems.append(f"自動コピーが1件ではありません ({len(copies)}件)")
     elif copies[0].read_text(encoding="utf-8") != body:
         problems.append("自動コピーの内容が MEMORY.md と一致しません")
     code, out = ctx.run()
     ctx.expect(problems, code, out, 0, "自動コピーは保存済み（同一内容）")
-    copies = list((proj / "hidden_files").glob("自動コピー_MEMORY_*.md"))
+    copies = list(snap_dir.glob("自動コピー_MEMORY_*.md")) if snap_dir.is_dir() else []
     if len(copies) != 1:
         problems.append(f"同一内容のコピーが重複しました ({len(copies)}件)")
     return problems
@@ -516,7 +506,9 @@ def case_anchor_check(ctx: Ctx) -> list[str]:
     problems: list[str] = []
     proj = _add_mgmt_project(ctx)
     hidden = proj / "hidden_files"
-    (hidden / "2026-11-06_MEMORY圧縮前_全文.md").write_text(
+    snap_dir = ctx.home / "本棚" / "MEMORYスナップショット"
+    snap_dir.mkdir(parents=True)
+    (snap_dir / "2026-11-06_MEMORY圧縮前_全文.md").write_text(
         "# MEMORY\n\n- テスト項目：検証は D999 と D998 で確定し、"
         "goal_deadbeef42 と『消えた本』を扱う。\n", encoding="utf-8")
     (ctx.project / "hidden_files" / "保持メモ.md").write_text(

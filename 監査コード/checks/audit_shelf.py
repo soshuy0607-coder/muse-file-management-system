@@ -28,22 +28,24 @@ def _headings(path: Path) -> set[str]:
     return {line.lstrip("# ").strip() for line in text.splitlines() if line.startswith("#")}
 
 
+def _snapshot_dir() -> Path:
+    """MEMORY.md スナップショットの置き場 (本棚直下の専用フォルダ)。"""
+    return HOME_DIR / "本棚" / "MEMORYスナップショット"
+
+
 def _save_memory_autocopy(text: str) -> str:
     """サイズ警告時に、その時点の MEMORY.md 全文を自動コピーする。
 
-    保存先は管理プロジェクトの hidden_files。ファイル名に
-    内容ハッシュを含め、同一内容は重複して作らない。
+    保存先は本棚直下の専用フォルダ。ファイル名に内容ハッシュを
+    含め、同一内容は重複して作らない。
     戻り値は、警告文に付す結果の一文。
     """
     import datetime
     import hashlib
 
-    proj = ROOT / "projects" / "ファイル管理システム_監査システム管理"
-    if not proj.is_dir():
-        return "自動コピーの保存先（管理プロジェクト）が無いため未保存"
-    dest_dir = proj / "hidden_files"
+    dest_dir = _snapshot_dir()
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
-    if list(dest_dir.glob(f"自動コピー_MEMORY_*_{digest}.md")):
+    if dest_dir.is_dir() and list(dest_dir.glob(f"自動コピー_MEMORY_*_{digest}.md")):
         return "自動コピーは保存済み（同一内容）"
     name = f"自動コピー_MEMORY_{datetime.date.today():%Y-%m-%d}_{digest}.md"
     try:
@@ -115,7 +117,7 @@ def _is_snapshot_name(name: str) -> bool:
 
 
 def _latest_snapshot() -> Path | None:
-    folder = ROOT.joinpath(*_MGMT_HIDDEN)
+    folder = _snapshot_dir()
     if not folder.is_dir():
         return None
     cands = [p for p in folder.iterdir() if p.is_file() and _is_snapshot_name(p.name)]
