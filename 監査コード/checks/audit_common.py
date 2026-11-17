@@ -21,6 +21,18 @@ MEMORY_ENTRY_CHAR_LIMIT = 3000  # MEMORY.md の1項目の長さの目安 (字数
 
 ALLOWED_ROOT_FILES: set[str] = set()  # workspace直下にファイルは置かない
 ALLOWED_PROJECTS_FILES = {"PROJECT_LIST.md"}
+# プッシュの同期記録は同期元フォルダの隣が定位置 (監査ルール16)。
+# 同期元がプロジェクトフォルダ自身の場合、記録は projects/ 直下に来るため、
+# 基名と一致するプロジェクトフォルダが実在する場合に限り例外として許可する。
+SYNC_RECORD_SUFFIX = ".muse-github-snapshot-sync.json"
+
+
+def is_project_sync_record(name: str) -> bool:
+    """projects/ 直下のファイル名が、実在プロジェクトの同期記録かどうか。"""
+    if not name.endswith(SYNC_RECORD_SUFFIX):
+        return False
+    base = name[: -len(SYNC_RECORD_SUFFIX)]
+    return bool(base) and (PROJECTS / base).is_dir()
 ALLOWED_PROJECT_FILES = {"INDEX.md", "chat.json"}
 # 直下に置けるのは入口とルール文書のみ。Git管理物（.git / .gitignore）は
 # バージョン管理の仕組みそのものなので例外として許可する（監査ルール13）。

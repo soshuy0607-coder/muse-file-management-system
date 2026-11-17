@@ -30,6 +30,7 @@ from audit_common import (  # noqa: E402
     AGENTS_FILE,
     ALLOWED_AUDIT_FILES,
     ALLOWED_PROJECTS_FILES,
+    is_project_sync_record,
     ALLOWED_ROOT_FILES,
     ARCHIVE,
     AUDIT_DIR,
@@ -268,8 +269,11 @@ def main() -> int:
         return 1
 
     # projects/ 直下のファイルは PROJECT_LIST.md のみ
+    # 例外: 同期元がプロジェクトフォルダ自身のプッシュ同期記録は、その隣
+    # (= projects/ 直下) が定位置 (監査ルール16・第3節ルール2の例外)。
     loose = [e.name for e in sorted(PROJECTS.iterdir())
-             if e.is_file() and e.name not in ALLOWED_PROJECTS_FILES]
+             if e.is_file() and e.name not in ALLOWED_PROJECTS_FILES
+             and not is_project_sync_record(e.name)]
     for fname in loose:
         res.error(f"[直置き] projects直下に許可されていないファイルがあります: {fname}")
     if not loose:

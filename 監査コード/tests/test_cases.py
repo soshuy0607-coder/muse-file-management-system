@@ -148,6 +148,26 @@ def case_root_loose_file(ctx: Ctx) -> list[str]:
     return problems
 
 
+def case_projects_sync_record_ok(ctx: Ctx) -> list[str]:
+    # 同期元がプロジェクトフォルダ自身の同期記録は projects/ 直下が定位置
+    problems: list[str] = []
+    rec = ctx.workspace / "projects" / (ctx.project.name + ".muse-github-snapshot-sync.json")
+    rec.write_text("[]", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 0, "判定: 問題なし")
+    return problems
+
+
+def case_projects_sync_record_stray(ctx: Ctx) -> list[str]:
+    # 基名と一致するプロジェクトが無い同期記録もどきは従来どおり直置きエラー
+    problems: list[str] = []
+    rec = ctx.workspace / "projects" / "存在しない_プロジェクト.muse-github-snapshot-sync.json"
+    rec.write_text("[]", encoding="utf-8")
+    code, out = ctx.run()
+    ctx.expect(problems, code, out, 1, "[直置き]")
+    return problems
+
+
 def case_agents_oversize(ctx: Ctx) -> list[str]:
     problems: list[str] = []
     agents = ctx.home / "AGENTS.md"
@@ -702,6 +722,8 @@ def case_incremental_code_change(ctx: Ctx) -> list[str]:
 CASES: dict[str, tuple] = {
     "healthy": (case_healthy, ["check_project", "cross", "shelf", "entry", "state"]),
     "root_loose_file": (case_root_loose_file, ["entry"]),
+    "projects_sync_record_ok": (case_projects_sync_record_ok, ["entry"]),
+    "projects_sync_record_stray": (case_projects_sync_record_stray, ["entry"]),
     "agents_oversize": (case_agents_oversize, ["entry"]),
     "project_bad_name": (case_project_bad_name, ["check_project"]),
     "project_missing_dir": (case_project_missing_dir, ["check_project"]),
